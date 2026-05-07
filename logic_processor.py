@@ -7,11 +7,7 @@ import pytesseract
 from PIL import Image
 from collections import Counter
 
-# set tesseract path
-if os.name == 'nt': 
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-else: 
-    pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # logic constants
 W_PANEL = 600
