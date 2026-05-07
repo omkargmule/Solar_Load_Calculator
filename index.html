@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solar_Load_Calculator — Analysis System</title>
+<script src="https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Different Font Choice */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
+
+:root {
+  --primary: #0F172A; /* Deep Navy */
+  --accent: #EAB308;  /* Industrial Gold */
+  --bg-main: #F1F5F9; /* Light Slate */
+  --card-bg: #FFFFFF;
+  --text-main: #1E293B;
+  --border-line: #CBD5E1;
+  --success: #16A34A;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Inter', sans-serif; background: var(--bg-main); color: var(--text-main); line-height: 1.6; }
+
+/* New Header Style */
+header {
+  background: var(--primary);
+  padding: 1.5rem;
+  color: white;
+  text-align: center;
+  border-bottom: 4px solid var(--accent);
+}
+header h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
+
+main { max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+
+/* Progress Stepper - Redesigned to be vertical/compact */
+.stepper { display: flex; justify-content: space-between; margin-bottom: 2rem; background: #fff; padding: 1rem; border-radius: 8px; border: 1px solid var(--border-line); }
+.step-dot { font-size: 0.75rem; color: #94A3B8; font-weight: 600; }
+.step-dot.active { color: var(--primary); border-bottom: 2px solid var(--accent); }
+
+/* Unified Input Box */
+.main-card { background: var(--card-bg); border-radius: 12px; padding: 2rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid var(--border-line); }
+.upload-area { border: 2px dashed var(--border-line); border-radius: 8px; padding: 3rem 1rem; text-align: center; cursor: pointer; transition: 0.3s; margin-bottom: 1.5rem; }
+.upload-area:hover { background: #F8FAFC; border-color: var(--primary); }
+.upload-area.active { background: #F0FDF4; border-color: var(--success); }
+
+.file-info { font-family: 'Roboto Mono', monospace; font-size: 0.8rem; color: var(--success); margin-top: 10px; display: none; }
+
+/* Buttons */
+.action-btn { width: 100%; padding: 1rem; border-radius: 6px; border: none; font-weight: 600; cursor: pointer; transition: 0.2s; font-family: inherit; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:disabled { background: #94A3B8; cursor: not-allowed; }
+.btn-download { background: var(--accent); color: var(--primary); margin-top: 1rem; }
+
+/* Progress bar */
+.loading-box { display: none; margin-top: 1.5rem; }
+.bar-container { height: 8px; background: #E2E8F0; border-radius: 10px; overflow: hidden; margin-top: 5px; }
+.bar-fill { height: 100%; background: var(--primary); width: 0%; transition: 0.3s; }
+
+/* Output display */
+#report-section { display: none; margin-top: 2rem; }
+.result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+.stat-card { background: #F8FAFC; padding: 1rem; border-radius: 6px; border: 1px solid var(--border-line); }
+.stat-label { font-size: 0.7rem; color: #64748B; text-transform: uppercase; font-weight: 600; }
+.stat-value { font-size: 1.2rem; font-weight: 600; color: var(--primary); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Solar_Load_Calculator</h1>
+</header>
+
+<main>
+  <div class="stepper">
+    <div id="st1" class="step-dot active">01. UPLOAD</div>
+    <div id="st2" class="step-dot">02. OCR</div>
+    <div id="st3" class="step-dot">03. RESULT</div>
+  </div>
+
+  <div class="main-card">
+    <div class="upload-area" id="drop-zone" onclick="document.getElementById('input-file').click()">
+      <input type="file" id="input-file" accept="image/*" hidden onchange="handleFile(this)">
+      <p style="font-size: 0.9rem; color: #64748B;">Click to select electricity bill image</p>
+      <div id="name-display" class="file-info"></div>
+    </div>
+
+    <button class="action-btn btn-primary" id="process-trigger" onclick="startEngine()" disabled>RUN ANALYSIS</button>
+
+    <div class="loading-box" id="load-box">
+      <div style="display:flex; justify-content: space-between; font-size: 0.75rem;">
+        <span id="load-status">Scanning document...</span>
+        <span id="load-pct">0%</span>
+      </div>
+      <div class="bar-container"><div class="bar-fill" id="bar-fill"></div></div>
+    </div>
+  </div>
+
+  <div id="report-section">
+    <div class="main-card">
+      <p style="font-size: 0.8rem; font-weight: 600; border-bottom: 1px solid #eee; padding-bottom: 5px;">SYSTEM COMPUTATION</p>
+      <div class="result-grid" id="out-grid"></div>
+      
+      <button class="action-btn btn-download" onclick="exportData()">DOWNLOAD EXCEL RESULT</button>
+      <button class="action-btn" onclick="location.reload()" style="background:none; color:#64748B; font-size:0.8rem; margin-top:10px;">Clear and Restart</button>
+    </div>
+  </div>
+</main>
+
+<script>
+let activeFile = null;
+let spreadsheetData = null;
+
+function handleFile(input) {
+  if (input.files[0]) {
+    activeFile = input.files[0];
+    document.getElementById('drop-zone').classList.add('active');
+    document.getElementById('name-display').style.display = 'block';
+    document.getElementById('name-display').textContent = "Selected: " + activeFile.name;
+    document.getElementById('process-trigger').disabled = false;
+  }
+}
+
+async function runOCR(file) {
+  const { createWorker } = Tesseract;
+  const worker = createWorker({
+    logger: m => {
+      if (m.status === 'recognizing text') {
+        let p = Math.round(m.progress * 100);
+        document.getElementById('bar-fill').style.width = p + '%';
+        document.getElementById('load-pct').textContent = p + '%';
+      }
+    }
+  });
+  await worker.load();
+  await worker.loadLanguage('eng');
+  await worker.initialize('eng');
+  const { data: { text } } = await worker.recognize(file);
+  await worker.terminate();
+  return text;
+}
+
+function startEngine() {
+  document.getElementById('process-trigger').disabled = true;
+  document.getElementById('load-box').style.display = 'block';
+  document.getElementById('st2').classList.add('active');
+
+  runOCR(activeFile).then(rawText => {
+    // Basic data slice
+    const uMatches = rawText.match(/(\d{1,4})\s+Units/i) || rawText.match(/Total\s+Units[:\s]+(\d+)/i);
+    const consumption = uMatches ? parseInt(uMatches[1]) : 150;
+    
+    const kwSize = (consumption * 12 * 1.1) / 1400;
+    const count = Math.round(kwSize * 1000 / 600);
+
+    displayStats(consumption, kwSize.toFixed(2), count);
+
+    // Prepare Spreadsheet
+    const book = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["Field", "Value"],
+      ["Consumer", "OCR Extracted"],
+      ["Consumption (Units)", consumption],
+      ["System Size (kWp)", kwSize.toFixed(2)],
+      ["Panels (600W)", count]
+    ]);
+    XLSX.utils.book_append_sheet(book, sheet, "Analysis");
+    spreadsheetData = XLSX.write(book, {bookType:'xlsx', type:'array'});
+
+    document.getElementById('load-box').style.display = 'none';
+    document.getElementById('report-section').style.display = 'block';
+    document.getElementById('st3').classList.add('active');
+  });
+}
+
+function displayStats(u, kw, p) {
+  const grid = document.getElementById('out-grid');
+  grid.innerHTML = `
+    <div class="stat-card"><div class="stat-label">Consumption</div><div class="stat-value">${u} Units</div></div>
+    <div class="stat-card"><div class="stat-label">System Size</div><div class="stat-value">${kw} kWp</div></div>
+    <div class="stat-card"><div class="stat-label">Panel Count</div><div class="stat-value">${p} Nos</div></div>
+  `;
+}
+
+function exportData() {
+  const b = new Blob([spreadsheetData], {type: "application/octet-stream"});
+  const url = window.URL.createObjectURL(b);
+  const anchor = document.createElement("a");
+  anchor.href = url; anchor.download = "Solar_Load_Result.xlsx"; anchor.click();
+}
+</script>
+</body>
+</html>
